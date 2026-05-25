@@ -319,10 +319,37 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                         for (i in 0 until accountArray.length()) {
                             val acc = accountArray.getJSONObject(i)
                             val id = acc.optString("id")
-                            val name = acc.optString("name").ifEmpty { acc.optString("title").ifEmpty { "Plex User" } }
-                            if (id.isNotEmpty()) {
+                            val name = acc.optString("name").ifEmpty { acc.optString("title").ifEmpty { acc.optString("username") } }
+                            if (id.isNotEmpty() && name.isNotEmpty()) {
                                 plexUserMap[id] = name
                             }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            // 0b. Also fetch shared/friend accounts from Plex.tv — the local /accounts endpoint
+            // only returns home/managed users. Friends (shared users) have large Plex.tv account
+            // IDs (e.g. 281356194) that only appear in the Plex.tv friends list.
+            try {
+                val friendsRequest = Request.Builder()
+                    .url("https://plex.tv/api/v2/friends?X-Plex-Token=$token")
+                    .addHeader("Accept", "application/json")
+                    .build()
+                val friendsResponse = client.newCall(friendsRequest).execute()
+                val friendsBody = friendsResponse.body?.string() ?: ""
+                if (friendsResponse.isSuccessful && friendsBody.isNotEmpty()) {
+                    val friendsArray = org.json.JSONArray(friendsBody)
+                    for (i in 0 until friendsArray.length()) {
+                        val friend = friendsArray.getJSONObject(i)
+                        val id = friend.optString("id")
+                        val name = friend.optString("username")
+                            .ifEmpty { friend.optString("title") }
+                            .ifEmpty { friend.optString("friendlyName") }
+                        if (id.isNotEmpty() && name.isNotEmpty()) {
+                            plexUserMap[id] = name
                         }
                     }
                 }
@@ -373,7 +400,7 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                 val historyResponse = client.newCall(historyRequest).execute()
                 val historyBody = historyResponse.body?.string() ?: ""
                 if (historyResponse.isSuccessful && historyBody.isNotEmpty()) {
-                    val parsedHistory = parsePlexHistory(historyBody, sanitizedUrl, token)
+                    val parsedHistory = parsePlexHistory(historyBody, sanitizedUrl, token, client)
                     if (parsedHistory.isNotEmpty()) {
                         _historyState.value = UiState.Success(parsedHistory)
                     } else {
@@ -498,66 +525,110 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
     private fun parsePlexHistory(
         bodyString: String,
         baseUrl: String = "",
-        token: String = ""
+        token: String = "",
+        client: OkHttpClient? = null
     ): List<TautulliHistoryItem> {
         val historyList = mutableListOf<TautulliHistoryItem>()
         try {
             val root = JSONObject(bodyString)
             val mc = root.optJSONObject("MediaContainer") ?: return emptyList()
             val metadataArray = mc.optJSONArray("History") ?: mc.optJSONArray("Metadata")
+                ?: return emptyList()
 
-            if (metadataArray != null) {
-                for (i in 0 until metadataArray.length()) {
-                    val item = metadataArray.getJSONObject(i)
+            // ── Phase 1: harvest embedded Account sub-objects and find unresolved IDs ──
+            val unresolvedIds = mutableSetOf<String>()
+            for (i in 0 until metadataArray.length()) {
+                val item = metadataArray.getJSONObject(i)
+                val accountId = item.optString("accountID").ifEmpty { item.optString("accountId") }
+                if (accountId.isEmpty()) continue
 
-                    val accountId = item.optString("accountID").ifEmpty { item.optString("accountId") }
-                    val user = if (accountId.isNotEmpty()) {
-                        plexUserMap[accountId] ?: if (accountId == "1") "Owner" else "User $accountId"
-                    } else {
-                        item.optString("user").ifEmpty { "Plex User" }
-                    }
+                // Some PMS versions embed Account directly in each history item
+                val subObj = item.optJSONObject("Account")
+                val embeddedName = subObj?.optString("name")?.takeIf { it.isNotEmpty() }
+                    ?: subObj?.optString("title")?.takeIf { it.isNotEmpty() }
 
-                    val device = item.optString("device").ifEmpty { "Plex Player" }
-                    val historyKey = item.optString("historyKey").ifEmpty { "hist_$i" }
-                    val parsedId = historyKey.substringAfterLast("/").toIntOrNull() ?: i
-                    val viewedAt = item.optLong("viewedAt", 0L)
-
-                    // Plex reports duration in milliseconds; convert to seconds
-                    val rawDuration = item.optLong("duration", 0L)
-                    val duration = when {
-                        rawDuration > 360000 -> rawDuration / 1000L
-                        rawDuration > 0      -> rawDuration
-                        else -> if (item.optString("type") == "movie") 5400L else 1800L
-                    }
-
-                    // Build absolute poster URL from Plex's relative thumb path
-                    val relativeThumb = item.optString("thumb")
-                    val fullThumbUrl = if (relativeThumb.isNotEmpty() && baseUrl.isNotEmpty()) {
-                        val cleanThumb = relativeThumb.removePrefix("/")
-                        "${baseUrl}${cleanThumb}?X-Plex-Token=$token"
-                    } else relativeThumb
-
-                    val ratingKey = item.optString("ratingKey")
-
-                    historyList.add(
-                        TautulliHistoryItem(
-                            id = parsedId,
-                            date = viewedAt,
-                            duration = duration,
-                            friendlyName = device,
-                            user = user,
-                            title = item.optString("title").ifEmpty { "Unknown" },
-                            parentTitle = item.optString("parentTitle"),
-                            grandparentTitle = item.optString("grandparentTitle"),
-                            type = item.optString("type").ifEmpty { "movie" },
-                            watchedStatus = 1,
-                            player = device,
-                            ipAddress = "",
-                            thumb = fullThumbUrl,
-                            ratingKey = ratingKey
-                        )
-                    )
+                if (embeddedName != null) {
+                    plexUserMap[accountId] = embeddedName
+                } else if (!plexUserMap.containsKey(accountId) && accountId != "1") {
+                    unresolvedIds.add(accountId)
                 }
+            }
+
+            // ── Phase 2: resolve each unknown ID via GET /accounts/{id} on the server ──
+            // This is the authoritative source — every accountID in history has a
+            // corresponding account entry on the same server.
+            if (client != null && baseUrl.isNotEmpty() && token.isNotEmpty()) {
+                for (accountId in unresolvedIds) {
+                    try {
+                        val resp = client.newCall(
+                            Request.Builder()
+                                .url("${baseUrl}accounts/$accountId?X-Plex-Token=$token&accept=json")
+                                .addHeader("Accept", "application/json")
+                                .build()
+                        ).execute()
+                        val body = resp.body?.string() ?: ""
+                        if (resp.isSuccessful && body.isNotEmpty()) {
+                            val accMc = JSONObject(body).optJSONObject("MediaContainer")
+                            val accArr = accMc?.optJSONArray("Account")
+                            if (accArr != null && accArr.length() > 0) {
+                                val acc = accArr.getJSONObject(0)
+                                val name = acc.optString("name").ifEmpty { acc.optString("title") }
+                                    .ifEmpty { acc.optString("username") }
+                                if (name.isNotEmpty()) plexUserMap[accountId] = name
+                            }
+                        }
+                    } catch (e: Exception) { /* ignore per-account fetch failure */ }
+                }
+            }
+
+            // ── Phase 3: build the history list with fully resolved user names ──
+            for (i in 0 until metadataArray.length()) {
+                val item = metadataArray.getJSONObject(i)
+
+                val accountId = item.optString("accountID").ifEmpty { item.optString("accountId") }
+                val user = when {
+                    accountId.isNotEmpty() ->
+                        plexUserMap[accountId] ?: if (accountId == "1") "Owner" else "User $accountId"
+                    else -> item.optString("user").ifEmpty { "Plex User" }
+                }
+                val device = item.optString("device").ifEmpty { "Plex Player" }
+                val historyKey = item.optString("historyKey").ifEmpty { "hist_$i" }
+                val parsedId = historyKey.substringAfterLast("/").toIntOrNull() ?: i
+                val viewedAt = item.optLong("viewedAt", 0L)
+
+                val rawDuration = item.optLong("duration", 0L)
+                val duration = when {
+                    rawDuration > 360000 -> rawDuration / 1000L
+                    rawDuration > 0      -> rawDuration
+                    else -> if (item.optString("type") == "movie") 5400L else 1800L
+                }
+
+                val relativeThumb = item.optString("thumb")
+                val fullThumbUrl = if (relativeThumb.isNotEmpty() && baseUrl.isNotEmpty()) {
+                    val cleanThumb = relativeThumb.removePrefix("/")
+                    "${baseUrl}${cleanThumb}?X-Plex-Token=$token"
+                } else relativeThumb
+
+                val ratingKey = item.optString("ratingKey")
+
+                historyList.add(
+                    TautulliHistoryItem(
+                        id = parsedId,
+                        date = viewedAt,
+                        duration = duration,
+                        friendlyName = device,
+                        user = user,
+                        title = item.optString("title").ifEmpty { "Unknown" },
+                        parentTitle = item.optString("parentTitle"),
+                        grandparentTitle = item.optString("grandparentTitle"),
+                        type = item.optString("type").ifEmpty { "movie" },
+                        watchedStatus = 1,
+                        player = device,
+                        ipAddress = "",
+                        thumb = fullThumbUrl,
+                        ratingKey = ratingKey
+                    )
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()

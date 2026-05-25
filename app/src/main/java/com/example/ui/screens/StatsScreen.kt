@@ -213,12 +213,16 @@ fun StatsScreen(
 
                     // Dynamically compile stats based on Selected pill Category (MOVIES vs TV SHOWS)
                     val compiled = remember(enrichedHistory, successSessions, selectedCategory) {
-                        // Filter history to last 60 days.
-                        val sixtyDaysAgoSecs = (System.currentTimeMillis() / 1000L) - (60L * 24L * 3600L)
-                        val sixtyDayHistory = enrichedHistory.filter { (it.date ?: 0L) >= sixtyDaysAgoSecs }
-                        
-                        // Fallback to full history if 60-day history is empty but complete history is populated, ensuring we never display empty stats unnecessarily
-                        val safeHistory = if (sixtyDayHistory.isEmpty() && enrichedHistory.isNotEmpty()) enrichedHistory else sixtyDayHistory
+                        // Filter history to year-to-date (Jan 1 of current year) to match the web dashboard
+                        val startOfYearSecs = java.util.Calendar.getInstance().run {
+                            set(get(java.util.Calendar.YEAR), java.util.Calendar.JANUARY, 1, 0, 0, 0)
+                            set(java.util.Calendar.MILLISECOND, 0)
+                            timeInMillis / 1000L
+                        }
+                        val yearToDateHistory = enrichedHistory.filter { (it.date ?: 0L) >= startOfYearSecs }
+
+                        // Fallback to full history if YTD history is empty but complete history is populated
+                        val safeHistory = if (yearToDateHistory.isEmpty() && enrichedHistory.isNotEmpty()) enrichedHistory else yearToDateHistory
 
                         val historySegmented = if (selectedCategory == "movies") {
                             safeHistory.filter { it.type == "movie" }
@@ -554,7 +558,7 @@ fun ServerOverviewGrid(
             MetricBox(
                 title = "TIME STREAMED",
                 value = formatDuration(totalDurationSecs),
-                subtitle = "Last 60 days duration",
+                subtitle = "Year to date duration",
                 icon = Icons.Default.History,
                 accentColor = NeonGreen,
                 modifier = Modifier.weight(1f)
@@ -562,7 +566,7 @@ fun ServerOverviewGrid(
             MetricBox(
                 title = playsLabel.uppercase(),
                 value = String.format("%,d", totalPlays),
-                subtitle = "Successful plays (60d)",
+                subtitle = "Successful plays (YTD)",
                 icon = Icons.Default.PlayArrow,
                 accentColor = NeonGreen,
                 modifier = Modifier.weight(1f)
@@ -575,7 +579,7 @@ fun ServerOverviewGrid(
             MetricBox(
                 title = "PROFILES",
                 value = activeProfiles.toString(),
-                subtitle = "Active users (last 60d)",
+                subtitle = "Active users (YTD)",
                 icon = Icons.Default.People,
                 accentColor = Color(0xFF00E676),
                 modifier = Modifier.weight(1f)
@@ -585,7 +589,7 @@ fun ServerOverviewGrid(
             MetricBox(
                 title = avgLabel.uppercase(),
                 value = formattedAvg,
-                subtitle = "Avg watch time (60d)",
+                subtitle = "Avg watch time (YTD)",
                 icon = Icons.Default.AccessTime,
                 accentColor = Color(0xFF00FF88),
                 modifier = Modifier.weight(1f)

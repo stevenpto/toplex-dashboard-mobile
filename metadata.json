@@ -1,0 +1,6 @@
+{
+  "name": "Tautulli Companion",
+  "description": "A beautiful companion dashboard to monitor server activity, streaming logs, and statistics for Tautulli and Plex.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

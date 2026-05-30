@@ -60,6 +60,9 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
     private val _plexLibraryStats = MutableStateFlow<PlexLibraryStats?>(null)
     val plexLibraryStats: StateFlow<PlexLibraryStats?> = _plexLibraryStats.asStateFlow()
 
+    private val _movieDetailState = MutableStateFlow<UiState<PlexMovieDetail>?>(null)
+    val movieDetailState: StateFlow<UiState<PlexMovieDetail>?> = _movieDetailState.asStateFlow()
+
     // Holds mock sessions for real-time progress simulation
     private val _simulatedSessions = MutableStateFlow<List<TautulliSession>>(emptyList())
     private var simulationJob: Job? = null
@@ -874,11 +877,209 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun clearMovieDetail() {
+        _movieDetailState.value = null
+    }
+
+    fun fetchMovieDetail(ratingKey: String) {
+        if (ratingKey.isEmpty()) return
+        viewModelScope.launch {
+            _movieDetailState.value = UiState.Loading
+
+            if (_useDemoMode.value) {
+                // Build demo detail from existing history data
+                val history = (_historyState.value as? UiState.Success)?.data ?: emptyList()
+                val item = history.firstOrNull { it.ratingKey == ratingKey }
+                _movieDetailState.value = UiState.Success(buildDemoMovieDetail(ratingKey, item?.title ?: "", item?.thumb ?: ""))
+                return@launch
+            }
+
+            val url   = _serverUrl.value
+            val api   = _apiKey.value
+            val type  = _serverType.value
+            if (url.isEmpty() || api.isEmpty()) {
+                _movieDetailState.value = UiState.Error("Server credentials missing.")
+                return@launch
+            }
+
+            try {
+                if (type == "tautulli") {
+                    val service  = TautulliApiClient.getService(url)
+                    val response = service.getMetadata(apiKey = api, ratingKey = ratingKey)
+                    if (response.response.result == "success") {
+                        val d = response.response.data
+                        if (d != null) {
+                            var cleanUrl = url.trim()
+                            if (!cleanUrl.endsWith("/")) cleanUrl = "$cleanUrl/"
+                            val thumbUrl = if (!d.thumb.isNullOrEmpty()) {
+                                val relative = d.thumb.removePrefix("/")
+                                "${cleanUrl}api/v2?apikey=${api}&cmd=get_thumbnail&thumb=${relative}"
+                            } else ""
+                            _movieDetailState.value = UiState.Success(
+                                PlexMovieDetail(
+                                    ratingKey  = ratingKey,
+                                    title      = d.title ?: "Unknown",
+                                    year       = d.year?.toString(),
+                                    summary    = d.summary,
+                                    genres     = d.genres?.mapNotNull { it.tag?.takeIf(String::isNotEmpty) } ?: emptyList(),
+                                    directors  = d.directors?.mapNotNull { it.tag?.takeIf(String::isNotEmpty) } ?: emptyList(),
+                                    actors     = d.actors?.mapNotNull { it.tag?.takeIf(String::isNotEmpty) } ?: emptyList(),
+                                    duration   = formatMetadataDuration(d.duration),
+                                    rating     = d.rating?.toFloat(),
+                                    contentRating = d.contentRating,
+                                    thumb      = thumbUrl
+                                )
+                            )
+                        } else {
+                            _movieDetailState.value = UiState.Error("No metadata returned for this item.")
+                        }
+                    } else {
+                        _movieDetailState.value = UiState.Error(response.response.message ?: "Metadata fetch failed.")
+                    }
+                } else {
+                    // Plex direct mode — call /library/metadata/{ratingKey}
+                    withContext(Dispatchers.IO) {
+                        var sanitizedUrl = url.trim()
+                        if (!sanitizedUrl.startsWith("http://") && !sanitizedUrl.startsWith("https://")) {
+                            sanitizedUrl = "http://$sanitizedUrl"
+                        }
+                        if (!sanitizedUrl.endsWith("/")) sanitizedUrl = "$sanitizedUrl/"
+                        val token  = sanitizeToken(api)
+                        val client = OkHttpClient.Builder()
+                            .connectTimeout(5, TimeUnit.SECONDS)
+                            .readTimeout(8, TimeUnit.SECONDS)
+                            .addInterceptor { chain ->
+                                chain.proceed(
+                                    chain.request().newBuilder()
+                                        .addHeader("X-Plex-Platform", "Android")
+                                        .addHeader("X-Plex-Client-Identifier", "toplex-dashboard-android")
+                                        .addHeader("X-Plex-Token", token)
+                                        .build()
+                                )
+                            }
+                            .build()
+                        val request = Request.Builder()
+                            .url("${sanitizedUrl}library/metadata/$ratingKey?X-Plex-Token=$token")
+                            .addHeader("Accept", "application/json")
+                            .build()
+                        val response = client.newCall(request).execute()
+                        val body = response.body?.string() ?: ""
+                        if (response.isSuccessful && body.isNotEmpty()) {
+                            val detail = parsePlexMetadataResponse(body, sanitizedUrl, token)
+                            _movieDetailState.value = if (detail != null) {
+                                UiState.Success(detail)
+                            } else {
+                                UiState.Error("Could not parse movie metadata.")
+                            }
+                        } else {
+                            _movieDetailState.value = UiState.Error("Plex returned HTTP ${response.code}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _movieDetailState.value = UiState.Error("Detail fetch error: ${e.localizedMessage ?: "Unknown error"}")
+            }
+        }
+    }
+
     /**
      * Fetches library-level stats from Plex API:
      * - Counts movies/shows added this calendar year via /library/sections/{key}/all sorted by addedAt desc
      * Must be called from within a withContext(Dispatchers.IO) block.
      */
+    private fun formatMetadataDuration(durationMs: Long?): String? {
+        if (durationMs == null || durationMs <= 0L) return null
+        val totalSecs = durationMs / 1000L
+        val h = totalSecs / 3600L
+        val m = (totalSecs % 3600L) / 60L
+        return if (h > 0L) "${h}h ${m}m" else "${m}m"
+    }
+
+    private fun parsePlexMetadataResponse(bodyString: String, baseUrl: String, token: String): PlexMovieDetail? {
+        return try {
+            val root  = JSONObject(bodyString)
+            val mc    = root.optJSONObject("MediaContainer") ?: return null
+            val arr   = mc.optJSONArray("Metadata") ?: return null
+            if (arr.length() == 0) return null
+            val item  = arr.getJSONObject(0)
+            val ratingKey = item.optString("ratingKey")
+            val title     = item.optString("title").ifEmpty { "Unknown" }
+            val year      = item.optInt("year", 0).let { if (it > 0) it.toString() else null }
+            val summary   = item.optString("summary").ifEmpty { null }
+            val durationMs = item.optLong("duration", 0L)
+            val rating    = item.optDouble("rating", 0.0).let { if (it > 0.0) it.toFloat() else null }
+            val contentRating = item.optString("contentRating").ifEmpty { null }
+            val relThumb  = item.optString("thumb")
+            val thumbUrl  = if (relThumb.isNotEmpty()) {
+                "${baseUrl}${relThumb.removePrefix("/")}?X-Plex-Token=$token"
+            } else ""
+            fun jsonTags(key: String): List<String> {
+                val a = item.optJSONArray(key) ?: return emptyList()
+                return (0 until a.length()).mapNotNull { a.getJSONObject(it).optString("tag").ifEmpty { null } }
+            }
+            PlexMovieDetail(
+                ratingKey     = ratingKey,
+                title         = title,
+                year          = year,
+                summary       = summary,
+                genres        = jsonTags("Genre"),
+                directors     = jsonTags("Director"),
+                actors        = jsonTags("Role"),
+                duration      = formatMetadataDuration(durationMs),
+                rating        = rating,
+                contentRating = contentRating,
+                thumb         = thumbUrl
+            )
+        } catch (e: Exception) { null }
+    }
+
+    private fun buildDemoMovieDetail(ratingKey: String, title: String, thumb: String): PlexMovieDetail {
+        return when {
+            title.contains("Oppenheimer", ignoreCase = true) -> PlexMovieDetail(
+                ratingKey, title, "2023",
+                "The story of J. Robert Oppenheimer and the development of the atomic bomb during World War II.",
+                listOf("Drama", "History", "Thriller"), listOf("Christopher Nolan"),
+                listOf("Cillian Murphy", "Emily Blunt", "Matt Damon", "Robert Downey Jr."),
+                "3h 0m", 8.3f, "R", thumb
+            )
+            title.contains("Dune", ignoreCase = true) -> PlexMovieDetail(
+                ratingKey, title, "2024",
+                "Paul Atreides unites with Chani and the Fremen to seek revenge against those who destroyed his family.",
+                listOf("Sci-Fi", "Adventure", "Drama"), listOf("Denis Villeneuve"),
+                listOf("Timothée Chalamet", "Zendaya", "Rebecca Ferguson", "Josh Brolin"),
+                "2h 46m", 8.5f, "PG-13", thumb
+            )
+            title.contains("Interstellar", ignoreCase = true) -> PlexMovieDetail(
+                ratingKey, title, "2014",
+                "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.",
+                listOf("Sci-Fi", "Drama", "Adventure"), listOf("Christopher Nolan"),
+                listOf("Matthew McConaughey", "Anne Hathaway", "Jessica Chastain"),
+                "2h 49m", 8.7f, "PG-13", thumb
+            )
+            title.contains("Everything Everywhere", ignoreCase = true) -> PlexMovieDetail(
+                ratingKey, title, "2022",
+                "An aging Chinese immigrant is swept up in an insane adventure in which she alone can save existence.",
+                listOf("Sci-Fi", "Comedy", "Action"), listOf("Daniels"),
+                listOf("Michelle Yeoh", "Stephanie Hsu", "Jamie Lee Curtis", "Ke Huy Quan"),
+                "2h 19m", 7.8f, "R", thumb
+            )
+            title.contains("Shawshank", ignoreCase = true) -> PlexMovieDetail(
+                ratingKey, title, "1994",
+                "Two imprisoned men bond over a number of years, finding solace and eventual redemption through acts of common decency.",
+                listOf("Drama"), listOf("Frank Darabont"),
+                listOf("Tim Robbins", "Morgan Freeman", "Bob Gunton"),
+                "2h 22m", 9.3f, "R", thumb
+            )
+            else -> PlexMovieDetail(
+                ratingKey, title.ifEmpty { "Unknown Movie" }, "2024",
+                "An exciting cinematic experience available on your Plex server. Connect to a real server to view full details.",
+                listOf("Drama"), listOf("Director"),
+                listOf("Lead Actor", "Supporting Actor"),
+                "2h 0m", 7.5f, "PG-13", thumb
+            )
+        }
+    }
+
     private fun fetchPlexLibraryStats(client: OkHttpClient, sanitizedUrl: String, token: String) {
         try {
             // Step 1: Discover library sections

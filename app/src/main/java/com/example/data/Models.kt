@@ -93,3 +93,40 @@ data class TautulliHomeStatRow(
 data class TautulliServerInfo(
     @Json(name = "server_name") val serverName: String? = ""
 )
+
+// Generic tag object used inside metadata arrays (genres, directors, actors)
+@JsonClass(generateAdapter = true)
+data class TautulliTag(
+    @Json(name = "tag") val tag: String? = ""
+)
+
+// Full movie metadata returned by Tautulli get_metadata command
+@JsonClass(generateAdapter = true)
+data class TautulliMetadataItem(
+    @Json(name = "rating_key") val ratingKey: String? = "",
+    @Json(name = "title") val title: String? = "",
+    @Json(name = "year") val year: Int? = null,
+    @Json(name = "summary") val summary: String? = "",
+    @Json(name = "duration") val duration: Long? = null,   // milliseconds
+    @Json(name = "rating") val rating: Double? = null,
+    @Json(name = "content_rating") val contentRating: String? = "",
+    @Json(name = "thumb") val thumb: String? = "",
+    @Json(name = "genres") val genres: List<TautulliTag>? = emptyList(),
+    @Json(name = "directors") val directors: List<TautulliTag>? = emptyList(),
+    @Json(name = "actors") val actors: List<TautulliTag>? = emptyList()
+)
+
+// Resolved movie detail shown in the detail dialog
+data class PlexMovieDetail(
+    val ratingKey: String,
+    val title: String,
+    val year: String?,
+    val summary: String?,
+    val genres: List<String>,
+    val directors: List<String>,
+    val actors: List<String>,
+    val duration: String?,
+    val rating: Float?,
+    val contentRating: String?,
+    val thumb: String?
+)

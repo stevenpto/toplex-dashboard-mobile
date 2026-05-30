@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,21 +10,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.data.TautulliHistoryItem
 import com.example.ui.TautulliViewModel
 import com.example.ui.UiState
 import com.example.ui.theme.*
-import java.text.SimpleDateFormat
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,19 +42,26 @@ fun HistoryScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = "History",
-                            tint = PlexOrange
-                        )
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = "History",
+                                tint = PlexOrange
+                            )
+                            Text(
+                                text = "Playback History",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                         Text(
-                            text = "Playback History",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            text = "Last 14 days · Movies & TV",
+                            fontSize = 11.sp,
+                            color = TextSecondary
                         )
                     }
                 },
@@ -101,9 +110,70 @@ fun HistoryScreen(
     }
 }
 
+private data class HistoryActivityEntry(
+    val day: String,
+    val title: String,
+    val showTitle: String,
+    val user: String,
+    val type: String,
+    val thumb: String,
+    val durationSecs: Long,
+    val player: String,
+    val dateUnix: Long
+)
+
+private data class HistoryMonthGroup(val monthLabel: String, val items: List<HistoryActivityEntry>)
+
+private fun buildHistoryMonthGroups(history: List<TautulliHistoryItem>): List<HistoryMonthGroup> {
+    val fourteenDaysAgoSecs = (System.currentTimeMillis() / 1000L) - (14L * 24L * 3600L)
+    val recent = history
+        .filter { (it.date ?: 0L) >= fourteenDaysAgoSecs }
+        .sortedByDescending { it.date ?: 0L }
+    val cal = Calendar.getInstance()
+    val monthNames = arrayOf("JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC")
+    return recent
+        .groupBy { item ->
+            val ts = (item.date ?: 0L) * 1000L
+            cal.timeInMillis = ts
+            "${monthNames[cal.get(Calendar.MONTH)]} ${cal.get(Calendar.YEAR)}"
+        }
+        .map { (monthLabel, items) ->
+            HistoryMonthGroup(
+                monthLabel = monthLabel,
+                items = items.map { item ->
+                    cal.timeInMillis = (item.date ?: 0L) * 1000L
+                    val isEpisode = item.type == "episode" && !item.grandparentTitle.isNullOrEmpty()
+                    HistoryActivityEntry(
+                        day = cal.get(Calendar.DAY_OF_MONTH).toString(),
+                        title = item.title ?: "Unknown",
+                        showTitle = if (isEpisode) item.grandparentTitle ?: "" else "",
+                        user = item.user ?: "Plex User",
+                        type = item.type ?: "movie",
+                        thumb = item.thumb ?: "",
+                        durationSecs = item.duration ?: 0L,
+                        player = item.player ?: "Plex",
+                        dateUnix = item.date ?: 0L
+                    )
+                }
+            )
+        }
+}
+
+private fun formatHistoryDuration(seconds: Long): String {
+    if (seconds <= 0) return ""
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    return when {
+        hours > 0 -> "${hours}h ${minutes}m"
+        else -> "${minutes}m"
+    }
+}
+
 @Composable
 fun HistoryContent(historyList: List<TautulliHistoryItem>) {
-    if (historyList.isEmpty()) {
+    val groups = remember(historyList) { buildHistoryMonthGroups(historyList) }
+
+    if (groups.isEmpty()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -119,15 +189,16 @@ fun HistoryContent(historyList: List<TautulliHistoryItem>) {
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "No History Recorded",
+                    text = "No Recent Activity",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
                 Text(
-                    text = "Playback logs will appear here once users start watching media on your server.",
+                    text = "No Movies or TV shows watched in the last 14 days.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
             }
@@ -137,133 +208,178 @@ fun HistoryContent(historyList: List<TautulliHistoryItem>) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        items(historyList) { item ->
-            HistoryItemCard(item = item)
+        groups.forEach { group ->
+            // Month header
+            item(key = "header_${group.monthLabel}") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(32.dp)
+                            .background(PlexOrange, RoundedCornerShape(2.dp))
+                    )
+                    Text(
+                        text = group.monthLabel,
+                        color = PlexOrange,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = "${group.items.size} ${if (group.items.size == 1) "play" else "plays"}",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            items(group.items, key = { "${group.monthLabel}_${it.dateUnix}_${it.title}_${it.user}" }) { entry ->
+                HistoryTimelineItem(entry = entry)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            item(key = "spacer_${group.monthLabel}") {
+                Spacer(modifier = Modifier.height(8.dp))
+            }
         }
     }
 }
 
 @Composable
-fun HistoryItemCard(item: TautulliHistoryItem) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+private fun HistoryTimelineItem(entry: HistoryActivityEntry) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
+        // Day number badge
+        Box(
             modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .size(28.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(PlexOrange.copy(alpha = 0.12f))
+                .border(1.dp, PlexOrange.copy(alpha = 0.3f), RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            val iconType = if (item.type == "episode") Icons.Default.Tv else Icons.Default.Movie
+            Text(
+                text = entry.day,
+                color = PlexOrange,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        // Thumbnail
+        if (entry.thumb.isNotEmpty()) {
+            AsyncImage(
+                model = entry.thumb,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(width = 36.dp, height = 50.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
+                    .size(width = 36.dp, height = 50.dp)
+                    .clip(RoundedCornerShape(6.dp))
                     .background(Color.White.copy(alpha = 0.05f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = iconType,
+                    imageVector = if (entry.type == "episode") Icons.Default.Tv else Icons.Default.Movie,
                     contentDescription = null,
-                    tint = PlexOrange,
-                    modifier = Modifier.size(20.dp)
+                    tint = TextMuted,
+                    modifier = Modifier.size(18.dp)
                 )
             }
+        }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title ?: "Unknown Title",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color.White,
-                    maxLines = 1
-                )
-                if (item.type == "episode") {
-                    val pTitle = item.parentTitle ?: ""
-                    val gTitle = item.grandparentTitle ?: ""
-                    Text(
-                        text = if (gTitle.isNotEmpty()) "$gTitle • $pTitle" else pTitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        maxLines = 1
-                    )
-                } else {
-                    Text(
-                        text = "Movie",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // Text content
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (entry.type == "episode") Color(0xFF1A3A5C) else Color(0xFF2A1A0C)
+                        )
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = item.user ?: "Guest",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlexOrange,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = "•",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted
-                    )
-                    Text(
-                        text = item.player ?: "Plex",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        maxLines = 1
+                        text = if (entry.type == "episode") "TV" else "MOVIE",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (entry.type == "episode") Color(0xFF5BB8F5) else PlexOrange
                     )
                 }
             }
-
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.Center
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = entry.title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (entry.showTitle.isNotEmpty()) {
+                Text(
+                    text = entry.showTitle,
+                    color = Color(0xFF5BB8F5).copy(alpha = 0.8f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = formatDuration(item.duration ?: 0L),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    text = entry.user,
+                    color = PlexOrange,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
                 )
+                if (entry.durationSecs > 0) {
+                    Text(text = "·", color = TextMuted, fontSize = 11.sp)
+                    Text(
+                        text = formatHistoryDuration(entry.durationSecs),
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+                Text(text = "·", color = TextMuted, fontSize = 11.sp)
                 Text(
-                    text = formatUnixTimestamp(item.date ?: 0L),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted
+                    text = entry.player,
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
     }
 }
 
-private fun formatDuration(seconds: Long): String {
-    if (seconds <= 0) return "0m"
-    val hours = seconds / 3600
-    val minutes = (seconds % 3600) / 60
-    return when {
-        hours > 0 -> "${hours}h ${minutes}m"
-        else -> "${minutes}m"
-    }
-}
-
-private fun formatUnixTimestamp(seconds: Long): String {
-    if (seconds <= 0) return ""
-    return try {
-        val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-        val date = Date(seconds * 1000)
-        sdf.format(date)
-    } catch (e: Exception) {
-        ""
-    }
-}

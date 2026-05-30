@@ -24,6 +24,13 @@ interface TautulliApiService {
     ): TautulliResponse<TautulliHistoryContainer>
 
     @GET("api/v2")
+    suspend fun getMetadata(
+        @Query("apikey") apiKey: String,
+        @Query("cmd") cmd: String = "get_metadata",
+        @Query("rating_key") ratingKey: String
+    ): TautulliResponse<TautulliMetadataItem>
+
+    @GET("api/v2")
     suspend fun getServerFriendlyName(
         @Query("apikey") apiKey: String,
         @Query("cmd") cmd: String = "get_server_friendly_name"

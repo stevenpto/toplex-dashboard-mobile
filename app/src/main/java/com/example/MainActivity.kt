@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.PeopleAlt
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,6 +27,7 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.ServerSetupScreen
 import com.example.ui.screens.StatsScreen
+import com.example.ui.screens.UsersScreen
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -118,7 +121,23 @@ fun MainTabsContainer(
           onClick = { selectedTab = 2 },
           icon = {
             Icon(
-              imageVector = if (selectedTab == 2) Icons.Filled.History else Icons.Outlined.History,
+              imageVector = if (selectedTab == 2) Icons.Filled.People else Icons.Outlined.PeopleAlt,
+              contentDescription = "Users"
+            )
+          },
+          label = { Text("Users") },
+          colors = NavigationBarItemDefaults.colors(
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        )
+
+        NavigationBarItem(
+          selected = selectedTab == 3,
+          onClick = { selectedTab = 3 },
+          icon = {
+            Icon(
+              imageVector = if (selectedTab == 3) Icons.Filled.History else Icons.Outlined.History,
               contentDescription = "History"
             )
           },
@@ -142,7 +161,12 @@ fun MainTabsContainer(
         viewModel = viewModel,
         modifier = modifier
       )
-      2 -> HistoryScreen(
+      2 -> UsersScreen(
+        viewModel = viewModel,
+        onNavigateToSettings = onNavigateToSettings,
+        modifier = modifier
+      )
+      3 -> HistoryScreen(
         viewModel = viewModel,
         onNavigateToSettings = onNavigateToSettings,
         modifier = modifier

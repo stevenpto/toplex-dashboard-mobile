@@ -214,17 +214,13 @@ fun ServerSummaryBadge(sessionsData: TautulliSessions) {
                     .align(Alignment.CenterVertically)
             )
 
-            // Dynamic speed format
-            val bandwidthMbps = try {
-                val bandwidthBps = (sessionsData.totalBandwidth ?: "0").toDoubleOrNull() ?: 0.0
-                String.format("%.1f", bandwidthBps / 1000.0)
-            } catch (e: Exception) {
-                "0.0"
-            }
+            val totalMbps = ((sessionsData.totalBandwidth ?: "0").toLongOrNull() ?: 0L)
+            val lanMbps   = ((sessionsData.lanBandwidth   ?: "0").toLongOrNull() ?: 0L)
+            val wanMbps   = ((sessionsData.wanBandwidth   ?: "0").toLongOrNull() ?: 0L)
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "${bandwidthMbps}M",
+                    text = String.format("%.1fM", totalMbps / 1000.0),
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     color = StreamCyan
@@ -234,6 +230,14 @@ fun ServerSummaryBadge(sessionsData: TautulliSessions) {
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
+                if (lanMbps > 0L || wanMbps > 0L) {
+                    Text(
+                        text = "LAN: ${String.format("%.1f", lanMbps / 1000.0)}  WAN: ${String.format("%.1f", wanMbps / 1000.0)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted,
+                        fontSize = 9.sp
+                    )
+                }
             }
 
             // Divider
@@ -246,8 +250,7 @@ fun ServerSummaryBadge(sessionsData: TautulliSessions) {
             )
 
             val hasTranscodes = sessionsData.sessions?.any { session ->
-                val decision = (session.transcodeDecision ?: "").lowercase()
-                decision.contains("trans") || decision.contains("copy")
+                (session.transcodeDecision ?: "").lowercase() == "transcode"
             } ?: false
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -271,6 +274,31 @@ fun SessionCard(
     sessionItem: TautulliSession,
     useDemoMode: Boolean
 ) {
+    val viewOffset = sessionItem.viewOffset ?: 0L
+    val duration   = sessionItem.duration   ?: 0L
+    val remainingMs   = if (duration > 0L) (duration - viewOffset).coerceAtLeast(0L) else 0L
+    val remainingMins = (remainingMs / 60000L).toInt()
+    val etaFormatted: String? = if (duration > 0L && remainingMs > 0L) {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = System.currentTimeMillis() + remainingMs }
+        val hour = cal.get(java.util.Calendar.HOUR).let { if (it == 0) 12 else it }
+        val min  = cal.get(java.util.Calendar.MINUTE)
+        val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
+        "$hour:${String.format("%02d", min)} $amPm"
+    } else null
+
+    val decision = (sessionItem.transcodeDecision ?: "direct play").lowercase().trim()
+    val decisionLabel = when (decision) {
+        "direct play"   -> "Direct Play"
+        "direct stream" -> "Direct Stream"
+        "transcode"     -> "Transcode"
+        else            -> decision.replaceFirstChar { it.uppercase() }
+    }
+    val decisionColor = when (decision) {
+        "transcode"     -> StreamTranscodeYellow
+        "direct stream" -> StreamCyan
+        else            -> TextSecondary
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant),
         shape = RoundedCornerShape(14.dp),
@@ -281,14 +309,11 @@ fun SessionCard(
                 modifier = Modifier
                     .padding(12.dp)
                     .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Render Poster thumbnail
-                Box(
-                    modifier = Modifier
-                        .size(width = 50.dp, height = 75.dp)
-                ) {
+                // Poster with resolution badge overlay
+                Box(modifier = Modifier.size(width = 70.dp, height = 105.dp)) {
                     if (!sessionItem.thumb.isNullOrEmpty()) {
                         AsyncImage(
                             model = sessionItem.thumb,
@@ -310,102 +335,127 @@ fun SessionCard(
                                 imageVector = if (sessionItem.type == "episode") Icons.Default.Tv else Icons.Default.Movie,
                                 contentDescription = null,
                                 tint = TextMuted,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                    // Resolution badge overlaid on poster bottom-left
+                    val res = sessionItem.videoResolution ?: ""
+                    if (res.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(4.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.Black.copy(alpha = 0.75f))
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = res.uppercase(),
+                                fontSize = 8.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                Column(modifier = Modifier.weight(1f)) {
-                    if (sessionItem.type == "episode") {
-                        val showName = sessionItem.grandparentTitle ?: ""
-                        val seasonStr = sessionItem.season ?: ""
-                        val episodeStr = sessionItem.episode ?: ""
-                        val epTitle = sessionItem.title ?: ""
-                        val seasonTitle = sessionItem.parentTitle ?: ""
+                // Content column — top: title/episode/time, bottom: stream type + user
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(105.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Top group: title, episode info, time remaining
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        if (sessionItem.type == "episode") {
+                            val showName   = sessionItem.grandparentTitle ?: ""
+                            val seasonStr  = sessionItem.season ?: ""
+                            val episodeStr = sessionItem.episode ?: ""
+                            val epTitle    = sessionItem.title ?: ""
 
-                        Text(
-                            text = if (showName.isNotEmpty()) showName else epTitle,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White,
-                            maxLines = 1
-                        )
-
-                        val formattedEpInfo = buildString {
-                            if (seasonStr.isNotEmpty() && episodeStr.isNotEmpty()) {
-                                val sParsed = seasonStr.toIntOrNull()
-                                val eParsed = episodeStr.toIntOrNull()
-                                if (sParsed != null && eParsed != null) {
-                                    append(String.format("S%02dE%02d", sParsed, eParsed))
-                                } else {
-                                    append("S${seasonStr}E${episodeStr}")
-                                }
-                            } else if (seasonTitle.isNotEmpty()) {
-                                append(seasonTitle)
-                                if (episodeStr.isNotEmpty()) {
-                                    append(" • Ep. $episodeStr")
-                                }
-                            }
-
-                            if (isNotEmpty() && epTitle.isNotEmpty() && epTitle != showName) {
-                                append(" • ")
-                            }
-                            if (epTitle.isNotEmpty() && epTitle != showName) {
-                                append(epTitle)
-                            }
-                        }
-
-                        if (formattedEpInfo.isNotEmpty()) {
                             Text(
-                                text = formattedEpInfo,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                text = showName.ifEmpty { epTitle },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color.White,
                                 maxLines = 1
                             )
-                        }
-                    } else {
-                        Text(
-                            text = sessionItem.title ?: "Unknown Title",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color.White,
-                            maxLines = 1
-                        )
-                        val year = if (sessionItem.year.isNullOrEmpty()) "" else " (${sessionItem.year})"
-                        Text(
-                            text = "Movie$year",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.hDp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
+                            val epInfo = buildString {
+                                val s = seasonStr.toIntOrNull()
+                                val e = episodeStr.toIntOrNull()
+                                if (s != null && e != null) append("S$s • E$e")
+                                else if (seasonStr.isNotEmpty()) append("S${seasonStr}E${episodeStr}")
+                                if (isNotEmpty() && epTitle.isNotEmpty()) append(" – ")
+                                if (epTitle.isNotEmpty()) append(epTitle)
+                            }
+                            if (epInfo.isNotEmpty()) {
+                                Text(
+                                    text = epInfo,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        } else {
                             Text(
-                                text = sessionItem.username ?: "Guest",
+                                text = sessionItem.title ?: "Unknown Title",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color.White,
+                                maxLines = 1
+                            )
+                            val year = sessionItem.year?.ifEmpty { null }
+                            Text(
+                                text = if (year != null) "Movie ($year)" else "Movie",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = PlexOrange,
-                                fontWeight = FontWeight.Bold
+                                color = TextSecondary
                             )
                         }
+                        // Time remaining / ETA
+                        if (remainingMins > 0 && etaFormatted != null) {
+                            Text(
+                                text = "$remainingMins min${if (remainingMins != 1) "s" else ""} left / ETA: $etaFormatted",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
 
+                    // Bottom group: stream decision + user/player
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
-                            text = "on ${sessionItem.player ?: "Plex Screen"}",
+                            text = decisionLabel,
                             style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            maxLines = 1
+                            color = decisionColor,
+                            fontWeight = FontWeight.SemiBold
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = sessionItem.username ?: "Guest",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PlexOrange,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "on ${sessionItem.player ?: "Plex"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -414,58 +464,6 @@ fun SessionCard(
                     contentDescription = sessionItem.state,
                     tint = if (sessionItem.state == "paused") TextMuted else StreamCyan,
                     modifier = Modifier.size(32.dp)
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.03f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Hd,
-                        contentDescription = "Resolution",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = sessionItem.videoResolution ?: "1080p",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                }
-
-                val decision = (sessionItem.transcodeDecision ?: "direct play").lowercase()
-                val isTranscoding = decision.contains("trans") || decision.contains("copy")
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(if (isTranscoding) StreamTranscodeYellow else StreamCyan)
-                    )
-                    Text(
-                        text = decision.uppercase(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isTranscoding) StreamTranscodeYellow else StreamCyan,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Text(
-                    text = sessionItem.ipAddress ?: "Local Network",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted
                 )
             }
 

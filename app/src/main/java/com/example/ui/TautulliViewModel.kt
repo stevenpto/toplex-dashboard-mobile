@@ -134,6 +134,8 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                 transcodeDecision = "direct play",
                 videoResolution = "4K UHD",
                 year = "2024",
+                duration = 10020000L,
+                viewOffset = 3807600L,
                 thumb = "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400&q=80"
             ),
             TautulliSession(
@@ -153,6 +155,8 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                 year = "2013",
                 grandparentTitle = "Breaking Bad",
                 parentTitle = "Season 5",
+                duration = 2880000L,
+                viewOffset = 2361600L,
                 thumb = "https://images.unsplash.com/photo-1578301978693-85fa9c0320b9?w=400&q=80"
             ),
             TautulliSession(
@@ -170,6 +174,8 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                 transcodeDecision = "direct stream",
                 videoResolution = "1080p",
                 year = "2014",
+                duration = 10140000L,
+                viewOffset = 5475600L,
                 thumb = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400&q=80"
             )
         )
@@ -203,7 +209,10 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                     val updated = current.map { session_item ->
                         if (session_item.state == "playing") {
                             val nextPct = (session_item.progressPercent ?: 0) + 1
-                            session_item.copy(progressPercent = if (nextPct > 100) 0 else nextPct)
+                            val clampedPct = if (nextPct > 100) 0 else nextPct
+                            val dur = session_item.duration ?: 0L
+                            val newOffset = if (dur > 0L) ((clampedPct / 100.0) * dur).toLong() else 0L
+                            session_item.copy(progressPercent = clampedPct, viewOffset = newOffset)
                         } else {
                             session_item
                         }
@@ -455,7 +464,15 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                     val sessionId = sessionObj?.optString("id") ?: "plex_sess_$i"
                     
                     val transcodeObj = item.optJSONObject("TranscodeSession")
-                    val videoDecision = transcodeObj?.optString("videoDecision") ?: "direct play"
+                    // Map Plex's "copy" decision (container remux) to "direct stream" for clarity
+                    val videoDecision = if (transcodeObj == null) {
+                        "direct play"
+                    } else {
+                        when (transcodeObj.optString("videoDecision", "copy").lowercase()) {
+                            "transcode" -> "transcode"
+                            else -> "direct stream"
+                        }
+                    }
                     
                     val viewOffset = item.optLong("viewOffset", 0L)
                     val duration = item.optLong("duration", 1L)
@@ -494,6 +511,8 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                             parentTitle = item.optString("parentTitle") ?: "",
                             season = seasonNum,
                             episode = episodeNum,
+                            viewOffset = viewOffset,
+                            duration = duration,
                             thumb = thumbUrl
                         )
                     )
@@ -507,7 +526,10 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
             if (totalBw == 0L && metadataArray != null) {
                 for (i in 0 until metadataArray.length()) {
                     val item = metadataArray.getJSONObject(i)
-                    totalBw += item.optLong("bandwidth", 0L)
+                    // Plex stores bandwidth in the Session sub-object; fall back to item-level
+                    val sessionObj = item.optJSONObject("Session")
+                    val bw = sessionObj?.optLong("bandwidth", 0L) ?: 0L
+                    totalBw += if (bw > 0L) bw else item.optLong("bandwidth", 0L)
                 }
                 lanBw = totalBw
             }

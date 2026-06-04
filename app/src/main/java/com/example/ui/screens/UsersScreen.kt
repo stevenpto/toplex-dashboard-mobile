@@ -204,8 +204,8 @@ fun UsersScreen(
     val popularTVThisWeek  = remember(history) { derivePopularTVThisWeek(history) }
     val userTVActivityRows = remember(history) { deriveUserTVActivityRows(history) }
 
-    // Pick up to 6 random thumbs from watched content for the header collage
-    val headerThumbs = remember(history, selectedCategory) {
+    // Pick one random backdrop thumb from watched content for the header
+    val headerThumb = remember(history, selectedCategory) {
         val thumbs = if (selectedCategory == "movies") {
             history.filter { it.type == "movie" && !it.thumb.isNullOrEmpty() }
                 .map { it.thumb!! }
@@ -213,7 +213,7 @@ fun UsersScreen(
             history.filter { it.type == "episode" && !it.grandparentThumb.isNullOrEmpty() }
                 .map { it.grandparentThumb!! }
         }
-        thumbs.distinct().shuffled().take(6)
+        thumbs.distinct().randomOrNull()
     }
 
     Scaffold(
@@ -246,44 +246,24 @@ fun UsersScreen(
                                 .fillMaxWidth()
                                 .height(180.dp)
                         ) {
-                            // Poster collage background
-                            if (headerThumbs.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .height(180.dp)
-                                ) {
-                                    val cols = headerThumbs.chunked(3)
-                                    cols.forEach { col ->
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(180.dp)
-                                        ) {
-                                            col.forEach { url ->
-                                                AsyncImage(
-                                                    model              = url,
-                                                    contentDescription = null,
-                                                    contentScale       = ContentScale.Crop,
-                                                    modifier           = Modifier
-                                                        .weight(1f)
-                                                        .fillMaxWidth()
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                // Dark scrim over the collage
+                            // Single random backdrop
+                            if (headerThumb != null) {
+                                AsyncImage(
+                                    model              = headerThumb,
+                                    contentDescription = null,
+                                    contentScale       = ContentScale.Crop,
+                                    alignment          = Alignment.TopCenter,
+                                    modifier           = Modifier.fillMaxSize()
+                                )
+                                // Dark scrim — light at top so image shows, opaque only at bottom edge
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .background(
                                             Brush.verticalGradient(
-                                                colorStops = arrayOf(
-                                                    0.0f to Color.Black.copy(alpha = 0.55f),
-                                                    0.6f to Color.Black.copy(alpha = 0.65f),
-                                                    1.0f to DarkBg
-                                                )
+                                                0.0f  to Color.Black.copy(alpha = 0.15f),
+                                                0.45f to Color.Black.copy(alpha = 0.50f),
+                                                1.0f  to DarkBg.copy(alpha = 0.97f)
                                             )
                                         )
                                 )

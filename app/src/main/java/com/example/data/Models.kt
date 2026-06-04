@@ -44,7 +44,9 @@ data class TautulliSession(
     @Json(name = "parent_title") val parentTitle: String? = "",
     @Json(name = "season") val season: String? = "",
     @Json(name = "episode") val episode: String? = "",
-    @Json(name = "thumb") val thumb: String? = ""
+    @Json(name = "thumb") val thumb: String? = "",
+    @Json(name = "view_offset") val viewOffset: Long? = 0L,
+    @Json(name = "duration") val duration: Long? = 0L
 )
 
 @JsonClass(generateAdapter = true)

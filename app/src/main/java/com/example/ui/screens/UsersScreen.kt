@@ -46,11 +46,17 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -75,7 +81,8 @@ private data class UserMovieEntry(
     val title: String,
     val thumb: String,
     val watchCount: Int,
-    val ratingKey: String
+    val ratingKey: String,
+    val subtitle: String = ""
 )
 
 private data class UserActivityRow(
@@ -126,6 +133,58 @@ private fun deriveUserActivityRows(history: List<TautulliHistoryItem>): List<Use
         .sortedBy { it.username.lowercase() }
 }
 
+// ─── TV helper functions ──────────────────────────────────────────────────────
+
+private fun derivePopularTVThisWeek(history: List<TautulliHistoryItem>): List<UserMovieEntry> {
+    val sevenDaysAgoSecs = (System.currentTimeMillis() / 1000L) - (7L * 24L * 3600L)
+    return history
+        .filter { it.type == "episode" && (it.date ?: 0L) >= sevenDaysAgoSecs }
+        .groupBy { it.grandparentTitle ?: it.title ?: "?" }
+        .map { (showTitle, items) ->
+            val first = items.first()
+            UserMovieEntry(
+                title      = showTitle,
+                thumb      = first.grandparentThumb?.takeIf { it.isNotEmpty() } ?: first.thumb ?: "",
+                watchCount = items.size,
+                ratingKey  = first.ratingKey ?: ""
+            )
+        }
+        .sortedByDescending { it.watchCount }
+        .take(4)
+}
+
+private fun deriveUserTVActivityRows(history: List<TautulliHistoryItem>): List<UserActivityRow> {
+    val thirtyDaysAgoSecs = (System.currentTimeMillis() / 1000L) - (30L * 24L * 3600L)
+    return history
+        .filter { it.type == "episode" && (it.date ?: 0L) >= thirtyDaysAgoSecs }
+        .groupBy { it.user ?: "Plex User" }
+        .map { (user, items) ->
+            val last4 = items.sortedByDescending { it.date ?: 0L }.take(4)
+            UserActivityRow(
+                username = user,
+                movies   = last4.map { ep ->
+                    val epTitle    = ep.title?.takeIf { it.isNotEmpty() } ?: ""
+                    val seasonName = ep.parentTitle?.takeIf { it.isNotEmpty() } ?: ""
+                    val subtitleText = when {
+                        epTitle.isNotEmpty() && seasonName.isNotEmpty() -> "$seasonName · $epTitle"
+                        epTitle.isNotEmpty() -> epTitle
+                        seasonName.isNotEmpty() -> seasonName
+                        else -> ""
+                    }
+                    UserMovieEntry(
+                        title      = ep.grandparentTitle ?: ep.title ?: "Unknown",
+                        thumb      = ep.grandparentThumb?.takeIf { it.isNotEmpty() } ?: ep.thumb ?: "",
+                        watchCount = 1,
+                        ratingKey  = ep.ratingKey ?: "",
+                        subtitle   = subtitleText
+                    )
+                }
+            )
+        }
+        .filter { it.movies.isNotEmpty() }
+        .sortedBy { it.username.lowercase() }
+}
+
 // ─── main screen ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,49 +197,27 @@ fun UsersScreen(
     val historyState    by viewModel.historyState.collectAsState()
     val movieDetailState by viewModel.movieDetailState.collectAsState()
 
-    val history          = (historyState as? UiState.Success)?.data ?: emptyList()
-    val popularThisWeek  = remember(history) { derivePopularThisWeek(history) }
-    val userActivityRows = remember(history) { deriveUserActivityRows(history) }
+    var selectedCategory by remember { mutableStateOf("movies") }
+    val history            = (historyState as? UiState.Success)?.data ?: emptyList()
+    val popularThisWeek    = remember(history) { derivePopularThisWeek(history) }
+    val userActivityRows   = remember(history) { deriveUserActivityRows(history) }
+    val popularTVThisWeek  = remember(history) { derivePopularTVThisWeek(history) }
+    val userTVActivityRows = remember(history) { deriveUserTVActivityRows(history) }
+
+    // Pick up to 6 random thumbs from watched content for the header collage
+    val headerThumbs = remember(history, selectedCategory) {
+        val thumbs = if (selectedCategory == "movies") {
+            history.filter { it.type == "movie" && !it.thumb.isNullOrEmpty() }
+                .map { it.thumb!! }
+        } else {
+            history.filter { it.type == "episode" && !it.grandparentThumb.isNullOrEmpty() }
+                .map { it.grandparentThumb!! }
+        }
+        thumbs.distinct().shuffled().take(6)
+    }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector     = Icons.Default.People,
-                                contentDescription = "Users",
-                                tint            = PlexOrange
-                            )
-                            Text(
-                                text       = "Users",
-                                fontWeight = FontWeight.Bold,
-                                color      = Color.White
-                            )
-                        }
-                        Text(
-                            text     = "Last 30 days · Movies",
-                            fontSize = 11.sp,
-                            color    = TextSecondary
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.forceRefresh() }) {
-                        Icon(
-                            imageVector        = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint               = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBg)
-            )
-        },
+        topBar = { /* header is inline in the list */ },
         containerColor = DarkBg,
         modifier        = modifier.fillMaxSize()
     ) { innerPadding ->
@@ -202,6 +239,128 @@ fun UsersScreen(
                     modifier       = Modifier.padding(innerPadding).fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 32.dp)
                 ) {
+                    // ── collage hero header ───────────────────────────────
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                        ) {
+                            // Poster collage background
+                            if (headerThumbs.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .height(180.dp)
+                                ) {
+                                    val cols = headerThumbs.chunked(3)
+                                    cols.forEach { col ->
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(180.dp)
+                                        ) {
+                                            col.forEach { url ->
+                                                AsyncImage(
+                                                    model              = url,
+                                                    contentDescription = null,
+                                                    contentScale       = ContentScale.Crop,
+                                                    modifier           = Modifier
+                                                        .weight(1f)
+                                                        .fillMaxWidth()
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                // Dark scrim over the collage
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colorStops = arrayOf(
+                                                    0.0f to Color.Black.copy(alpha = 0.55f),
+                                                    0.6f to Color.Black.copy(alpha = 0.65f),
+                                                    1.0f to DarkBg
+                                                )
+                                            )
+                                        )
+                                )
+                            } else {
+                                // No data yet — plain dark background
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(DarkBg)
+                                )
+                            }
+
+                            // Content: title row + refresh + subtitle + toggle
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                // Title + refresh
+                                Row(
+                                    modifier              = Modifier.fillMaxWidth(),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment     = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector        = Icons.Default.People,
+                                            contentDescription = "Users",
+                                            tint               = PlexOrange
+                                        )
+                                        Text(
+                                            text       = "Users",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize   = 20.sp,
+                                            color      = Color.White
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.forceRefresh() }) {
+                                        Icon(
+                                            imageVector        = Icons.Default.Refresh,
+                                            contentDescription = "Refresh",
+                                            tint               = Color.White
+                                        )
+                                    }
+                                }
+
+                                // Bottom: subtitle + toggle
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text     = "Last 30 days · ${if (selectedCategory == "movies") "Movies" else "TV Shows"}",
+                                        fontSize = 11.sp,
+                                        color    = Color.White.copy(alpha = 0.7f)
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment     = Alignment.CenterVertically
+                                    ) {
+                                        CategoryPillButton(
+                                            text     = "MOVIES",
+                                            selected = selectedCategory == "movies",
+                                            onClick  = { selectedCategory = "movies" }
+                                        )
+                                        CategoryPillButton(
+                                            text     = "TV SHOWS",
+                                            selected = selectedCategory == "tvshows",
+                                            onClick  = { selectedCategory = "tvshows" }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // ── hint ──────────────────────────────────────────────
                     item {
                         Text(
@@ -212,63 +371,116 @@ fun UsersScreen(
                         )
                     }
 
-                    // ── Popular This Week ─────────────────────────────────
-                    if (popularThisWeek.isNotEmpty()) {
+                    if (selectedCategory == "movies") {
+                        // ── Popular This Week (Movies) ────────────────────
+                        if (popularThisWeek.isNotEmpty()) {
+                            item {
+                                UsersSectionHeader(
+                                    title    = "POPULAR THIS WEEK",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
+                            }
+                            item {
+                                LazyRow(
+                                    contentPadding        = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier              = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(popularThisWeek, key = { idx, it -> "pop_${idx}_${it.ratingKey.ifEmpty { it.title }}" }) { _, movie ->
+                                        PopularMoviePosterCard(
+                                            movie       = movie,
+                                            onDoubleTap = {
+                                                if (movie.ratingKey.isNotEmpty()) viewModel.fetchMovieDetail(movie.ratingKey)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            item { Spacer(modifier = Modifier.height(24.dp)) }
+                        }
+
+                        // ── Recent Activity (Movies) ──────────────────────
                         item {
                             UsersSectionHeader(
-                                title    = "POPULAR THIS WEEK",
+                                title    = "RECENT ACTIVITY",
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                             )
                         }
-                        item {
-                            LazyRow(
-                                contentPadding       = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier             = Modifier.fillMaxWidth()
-                            ) {
-                                itemsIndexed(popularThisWeek, key = { idx, it -> "pop_${idx}_${it.ratingKey.ifEmpty { it.title }}" }) { _, movie ->
-                                    PopularMoviePosterCard(
-                                        movie      = movie,
-                                        onDoubleTap = {
-                                            if (movie.ratingKey.isNotEmpty()) viewModel.fetchMovieDetail(movie.ratingKey)
-                                        }
+                        if (userActivityRows.isEmpty()) {
+                            item {
+                                Box(
+                                    modifier         = Modifier.fillMaxWidth().padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text      = "No movie activity found in the last 30 days.",
+                                        color     = TextMuted,
+                                        textAlign = TextAlign.Center
                                     )
                                 }
                             }
-                        }
-                        item { Spacer(modifier = Modifier.height(24.dp)) }
-                    }
-
-                    // ── Recent Activity ───────────────────────────────────
-                    item {
-                        UsersSectionHeader(
-                            title    = "RECENT ACTIVITY",
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                        )
-                    }
-
-                    if (userActivityRows.isEmpty()) {
-                        item {
-                            Box(
-                                modifier         = Modifier.fillMaxWidth().padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text      = "No movie activity found in the last 30 days.",
-                                    color     = TextMuted,
-                                    textAlign = TextAlign.Center
+                        } else {
+                            itemsIndexed(userActivityRows, key = { idx, it -> "user_${idx}_${it.username}" }) { _, row ->
+                                UserActivityCard(
+                                    row              = row,
+                                    onMovieDoubleTap = { ratingKey ->
+                                        if (ratingKey.isNotEmpty()) viewModel.fetchMovieDetail(ratingKey)
+                                    },
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                                 )
                             }
                         }
                     } else {
-                        itemsIndexed(userActivityRows, key = { idx, it -> "user_${idx}_${it.username}" }) { _, row ->
-                            UserActivityCard(
-                                row            = row,
-                                onMovieDoubleTap = { ratingKey ->
-                                    if (ratingKey.isNotEmpty()) viewModel.fetchMovieDetail(ratingKey)
-                                },
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        // ── Popular This Week (TV Shows) ──────────────────
+                        if (popularTVThisWeek.isNotEmpty()) {
+                            item {
+                                UsersSectionHeader(
+                                    title    = "POPULAR THIS WEEK",
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
+                            }
+                            item {
+                                LazyRow(
+                                    contentPadding        = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier              = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(popularTVThisWeek, key = { idx, it -> "tvpop_${idx}_${it.ratingKey.ifEmpty { it.title }}" }) { _, show ->
+                                        PopularShowPosterCard(show = show)
+                                    }
+                                }
+                            }
+                            item { Spacer(modifier = Modifier.height(24.dp)) }
+                        }
+
+                        // ── Recent Activity (TV Shows) ────────────────────
+                        item {
+                            UsersSectionHeader(
+                                title    = "RECENT ACTIVITY",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                             )
+                        }
+                        if (userTVActivityRows.isEmpty()) {
+                            item {
+                                Box(
+                                    modifier         = Modifier.fillMaxWidth().padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text      = "No TV activity found in the last 30 days.",
+                                        color     = TextMuted,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        } else {
+                            itemsIndexed(userTVActivityRows, key = { idx, it -> "tvuser_${idx}_${it.username}" }) { _, row ->
+                                UserActivityCard(
+                                    row              = row,
+                                    onMovieDoubleTap = { /* no detail sheet for TV yet */ },
+                                    modifier         = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -404,6 +616,72 @@ private fun PopularMoviePosterCard(
     }
 }
 
+// ─── popular TV show poster card ──────────────────────────────────────────────
+
+@Composable
+private fun PopularShowPosterCard(show: UserMovieEntry) {
+    Column(
+        modifier            = Modifier.width(120.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 120.dp, height = 170.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+        ) {
+            if (show.thumb.isNotEmpty()) {
+                AsyncImage(
+                    model              = show.thumb,
+                    contentDescription = show.title,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(
+                    modifier         = Modifier.fillMaxSize().background(DarkSurface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Tv, null, tint = TextMuted, modifier = Modifier.size(36.dp))
+                }
+            }
+
+            // episode-count badge
+            if (show.watchCount > 1) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text       = "${show.watchCount}×",
+                        color      = PlexOrange,
+                        fontSize   = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text       = show.title,
+            color      = Color.White,
+            fontSize   = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines   = 2,
+            overflow   = TextOverflow.Ellipsis
+        )
+        Text(
+            text     = "${show.watchCount} ${if (show.watchCount == 1) "play" else "plays"}",
+            color    = PlexOrange,
+            fontSize = 10.sp
+        )
+    }
+}
+
 // ─── per-user activity card ───────────────────────────────────────────────────
 
 @Composable
@@ -456,17 +734,40 @@ private fun UserActivityCard(
                 )
             }
 
-            // movie poster row — equal-width slots so nothing gets clipped
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                row.movies.forEachIndexed { idx, movie ->
-                    UserMoviePosterItem(
-                        movie       = movie,
-                        onDoubleTap = { onMovieDoubleTap(movie.ratingKey) },
-                        modifier    = Modifier.weight(1f)
-                    )
+            // Adaptive poster layout: single row on tablet (≥600dp), 2×2 grid on phone
+            val isTablet = LocalConfiguration.current.screenWidthDp >= 600
+            if (isTablet) {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    row.movies.forEach { movie ->
+                        UserMoviePosterItem(
+                            movie       = movie,
+                            onDoubleTap = { onMovieDoubleTap(movie.ratingKey) },
+                            modifier    = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else {
+                val chunks = row.movies.chunked(2)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    chunks.forEach { pair ->
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            pair.forEach { movie ->
+                                UserMoviePosterItem(
+                                    movie       = movie,
+                                    onDoubleTap = { onMovieDoubleTap(movie.ratingKey) },
+                                    modifier    = Modifier.weight(1f)
+                                )
+                            }
+                            // pad last row if odd number of movies
+                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
             }
         }
@@ -488,7 +789,7 @@ private fun UserMoviePosterItem(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(130.dp)
+                .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(8.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
                 .pointerInput(movie.ratingKey) {
@@ -499,7 +800,7 @@ private fun UserMoviePosterItem(
                 AsyncImage(
                     model              = movie.thumb,
                     contentDescription = movie.title,
-                    contentScale       = ContentScale.Crop,
+                    contentScale       = ContentScale.Fit,
                     modifier           = Modifier.fillMaxSize()
                 )
             } else {
@@ -520,6 +821,16 @@ private fun UserMoviePosterItem(
             overflow   = TextOverflow.Ellipsis,
             lineHeight = 13.sp
         )
+        if (movie.subtitle.isNotEmpty()) {
+            Text(
+                text       = movie.subtitle,
+                color      = TextMuted,
+                fontSize   = 9.sp,
+                maxLines   = 2,
+                overflow   = TextOverflow.Ellipsis,
+                lineHeight = 12.sp
+            )
+        }
     }
 }
 

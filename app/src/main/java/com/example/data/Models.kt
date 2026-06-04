@@ -68,6 +68,7 @@ data class TautulliHistoryItem(
     @Json(name = "ip_address") val ipAddress: String? = "",
     // Plex-specific fields for poster image construction
     @Json(name = "thumb") val thumb: String? = "",
+    @Json(name = "grandparent_thumb") val grandparentThumb: String? = "",
     @Json(name = "rating_key") val ratingKey: String? = ""
 )
 

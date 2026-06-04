@@ -178,17 +178,17 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
         val wk = 604800L
         val mockHistory = listOf(
             TautulliHistoryItem(id=101, date=now-1800, duration=8100, friendlyName="Apple TV 4K", user="steve", title="Oppenheimer", type="movie", watchedStatus=1, player="Apple TV 4K", ipAddress="192.168.1.144", thumb="https://images.unsplash.com/photo-1444703686981-a3abbc4d4fe3?w=200&q=80", ratingKey="101"),
-            TautulliHistoryItem(id=102, date=now-7200, duration=3300, friendlyName="iPad Pro", user="sarah_k", title="Connor's Wedding", parentTitle="Season 4", grandparentTitle="Succession", type="episode", watchedStatus=1, player="Plex for iOS", ipAddress="10.0.0.45", thumb="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=200&q=80", ratingKey="102"),
+            TautulliHistoryItem(id=102, date=now-7200, duration=3300, friendlyName="iPad Pro", user="sarah_k", title="Connor's Wedding", parentTitle="Season 4", grandparentTitle="Succession", type="episode", watchedStatus=1, player="Plex for iOS", ipAddress="10.0.0.45", thumb="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=200&q=80", grandparentThumb="https://images.unsplash.com/photo-1578022761797-b8636ac1773c?w=300&q=80", ratingKey="102"),
             TautulliHistoryItem(id=103, date=now-14400, duration=4500, friendlyName="Plex Web", user="mike_sh", title="Everything Everywhere All at Once", type="movie", watchedStatus=1, player="Chrome (OSX)", ipAddress="99.102.34.12", thumb="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=200&q=80", ratingKey="103"),
-            TautulliHistoryItem(id=104, date=now-86400, duration=2700, friendlyName="FireStick", user="sarah_k", title="Pilot", parentTitle="Season 1", grandparentTitle="Severance", type="episode", watchedStatus=1, player="Plex for FireTV", ipAddress="192.168.1.189", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", ratingKey="104"),
+            TautulliHistoryItem(id=104, date=now-86400, duration=2700, friendlyName="FireStick", user="sarah_k", title="Pilot", parentTitle="Season 1", grandparentTitle="Severance", type="episode", watchedStatus=1, player="Plex for FireTV", ipAddress="192.168.1.189", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", grandparentThumb="https://images.unsplash.com/photo-1497366216548-37526070297c?w=300&q=80", ratingKey="104"),
             TautulliHistoryItem(id=105, date=now-wk-54000, duration=8200, friendlyName="LG WebOS TV", user="steve", title="Dune: Part Two", type="movie", watchedStatus=1, player="LG TV Client", ipAddress="192.168.1.115", thumb="https://images.unsplash.com/photo-1534447677768-be436bb09401?w=200&q=80", ratingKey="105"),
-            TautulliHistoryItem(id=106, date=now-wk-108000, duration=2900, friendlyName="Shield TV", user="jesse", title="Ozymandias", parentTitle="Season 5", grandparentTitle="Breaking Bad", type="episode", watchedStatus=1, player="Shield Android TV", ipAddress="192.168.1.102", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", ratingKey="106"),
+            TautulliHistoryItem(id=106, date=now-wk-108000, duration=2900, friendlyName="Shield TV", user="jesse", title="Ozymandias", parentTitle="Season 5", grandparentTitle="Breaking Bad", type="episode", watchedStatus=1, player="Shield Android TV", ipAddress="192.168.1.102", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", grandparentThumb="https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?w=300&q=80", ratingKey="106"),
             TautulliHistoryItem(id=107, date=now-2*wk-43200, duration=9900, friendlyName="Apple TV 4K", user="cooper", title="Interstellar", type="movie", watchedStatus=1, player="Apple TV 4K", ipAddress="10.0.0.77", thumb="https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=200&q=80", ratingKey="107"),
-            TautulliHistoryItem(id=108, date=now-2*wk-90000, duration=2400, friendlyName="Plex Web", user="mike_sh", title="The Bear — S2 Premiere", parentTitle="Season 2", grandparentTitle="The Bear", type="episode", watchedStatus=1, player="Chrome (OSX)", ipAddress="99.102.34.12", thumb="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=200&q=80", ratingKey="108"),
+            TautulliHistoryItem(id=108, date=now-2*wk-90000, duration=2400, friendlyName="Plex Web", user="mike_sh", title="The Bear — S2 Premiere", parentTitle="Season 2", grandparentTitle="The Bear", type="episode", watchedStatus=1, player="Chrome (OSX)", ipAddress="99.102.34.12", thumb="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=200&q=80", grandparentThumb="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=300&q=80", ratingKey="108"),
             TautulliHistoryItem(id=109, date=now-3*wk-21600, duration=8100, friendlyName="Shield TV", user="cooper", title="Oppenheimer", type="movie", watchedStatus=1, player="Shield Android TV", ipAddress="192.168.1.102", thumb="https://images.unsplash.com/photo-1444703686981-a3abbc4d4fe3?w=200&q=80", ratingKey="109"),
             TautulliHistoryItem(id=110, date=now-3*wk-136800, duration=8400, friendlyName="Plex Web", user="sarah_k", title="The Shawshank Redemption", type="movie", watchedStatus=1, player="Firefox (Windows)", ipAddress="10.0.0.45", thumb="https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=200&q=80", ratingKey="110"),
             TautulliHistoryItem(id=111, date=now-4*wk-18000, duration=4500, friendlyName="iPhone 15", user="jesse", title="Everything Everywhere All at Once", type="movie", watchedStatus=1, player="Plex for iOS", ipAddress="172.56.21.90", thumb="https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=200&q=80", ratingKey="111"),
-            TautulliHistoryItem(id=112, date=now-4*wk-72000, duration=2700, friendlyName="iPad Pro", user="sarah_k", title="The Confrontation", parentTitle="Season 1", grandparentTitle="Severance", type="episode", watchedStatus=1, player="Plex for iOS", ipAddress="10.0.0.45", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", ratingKey="112")
+            TautulliHistoryItem(id=112, date=now-4*wk-72000, duration=2700, friendlyName="iPad Pro", user="sarah_k", title="The Confrontation", parentTitle="Season 1", grandparentTitle="Severance", type="episode", watchedStatus=1, player="Plex for iOS", ipAddress="10.0.0.45", thumb="https://images.unsplash.com/photo-1585647347483-22b66260dfff?w=200&q=80", grandparentThumb="https://images.unsplash.com/photo-1497366216548-37526070297c?w=300&q=80", ratingKey="112")
         )
 
         _historyState.value = UiState.Success(mockHistory)
@@ -612,6 +612,12 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                     "${baseUrl}${cleanThumb}?X-Plex-Token=$token"
                 } else relativeThumb
 
+                val relativeGrandparentThumb = item.optString("grandparentThumb")
+                val fullGrandparentThumbUrl = if (relativeGrandparentThumb.isNotEmpty() && baseUrl.isNotEmpty()) {
+                    val cleanThumb = relativeGrandparentThumb.removePrefix("/")
+                    "${baseUrl}${cleanThumb}?X-Plex-Token=$token"
+                } else relativeGrandparentThumb
+
                 val ratingKey = item.optString("ratingKey")
 
                 historyList.add(
@@ -629,6 +635,7 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                         player = device,
                         ipAddress = "",
                         thumb = fullThumbUrl,
+                        grandparentThumb = fullGrandparentThumbUrl,
                         ratingKey = ratingKey
                     )
                 )
@@ -704,6 +711,12 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                             "${sanitizedUrl}${clean}?X-Plex-Token=$token"
                         } else relativeThumb
 
+                        val relativeGrandparentThumb = item.optString("grandparentThumb")
+                        val fullGrandparentThumbUrl = if (relativeGrandparentThumb.isNotEmpty()) {
+                            val clean = relativeGrandparentThumb.removePrefix("/")
+                            "${sanitizedUrl}${clean}?X-Plex-Token=$token"
+                        } else relativeGrandparentThumb
+
                         val ratingKey = item.optString("ratingKey")
                         val resolvedUser = plexUserMap["1"] ?: "Owner"
 
@@ -722,6 +735,7 @@ class TautulliViewModel(application: Application) : AndroidViewModel(application
                                 player = "Plex",
                                 ipAddress = "",
                                 thumb = fullThumbUrl,
+                                grandparentThumb = fullGrandparentThumbUrl,
                                 ratingKey = ratingKey
                             )
                         )

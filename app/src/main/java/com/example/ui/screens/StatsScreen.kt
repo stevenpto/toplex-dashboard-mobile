@@ -21,12 +21,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -90,16 +99,19 @@ fun StatsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(NeonGreen)
+                            Icon(
+                                imageVector = Icons.Default.BarChart,
+                                contentDescription = null,
+                                tint = NeonGreen,
+                                modifier = Modifier.size(22.dp)
                             )
                             Text(
-                                text = "Toplex Analytics",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                text = buildAnnotatedString {
+                                    withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold)) { append("to") }
+                                    withStyle(SpanStyle(color = NeonGreen,  fontWeight = FontWeight.ExtraBold)) { append("/") }
+                                    withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.ExtraBold)) { append("plex") }
+                                    withStyle(SpanStyle(color = TextMuted,   fontWeight = FontWeight.Normal))   { append(" analytics") }
+                                },
                                 fontSize = 19.sp
                             )
                         }
@@ -1145,14 +1157,32 @@ fun PopularContentDeck(title: String, topMedia: List<TopMediaItem>) {
     }
 }
 
-// Peak watching hours bar graphics
+// Peak watching hours — smooth area/line chart
 @Composable
 fun WatchHourPeaksCard(hourStats: List<HourStat>) {
     val peakVal = hourStats.maxOfOrNull { it.weight }?.coerceAtLeast(1f) ?: 1f
+    val peakItem = hourStats.maxByOrNull { it.weight }
 
-    ToplexCard(
-        borderColor = NeonGreen.copy(alpha = 0.2f)
-    ) {
+    // Animate each point weight for a smooth entry
+    val animatedWeights = hourStats.map { stat ->
+        val anim = remember(stat.label) { Animatable(0f) }
+        LaunchedEffect(stat.weight) {
+            anim.animateTo(
+                targetValue = stat.weight,
+                animationSpec = tween(durationMillis = 900, easing = EaseOutCubic)
+            )
+        }
+        anim.value
+    }
+
+    val lineColor   = NeonGreen
+    val fillTop     = NeonGreen.copy(alpha = 0.35f)
+    val fillBottom  = NeonGreen.copy(alpha = 0.00f)
+    val dotColor    = NeonGreen
+    val gridColor   = Color.White.copy(alpha = 0.05f)
+
+    ToplexCard(borderColor = NeonGreen.copy(alpha = 0.2f)) {
+        // Header
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1167,104 +1197,150 @@ fun WatchHourPeaksCard(hourStats: List<HourStat>) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Timeline,
+                    imageVector        = Icons.Default.Timeline,
                     contentDescription = null,
-                    tint = NeonGreen,
-                    modifier = Modifier.size(18.dp)
+                    tint               = NeonGreen,
+                    modifier           = Modifier.size(18.dp)
                 )
             }
             Column {
                 Text(
-                    text = "Weekly Activity Peak Hours",
-                    style = MaterialTheme.typography.titleMedium,
+                    text       = "Activity by Time of Day",
+                    style      = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color      = Color.White
                 )
                 Text(
-                    text = "Chronological concentration metrics",
+                    text  = "Plays per 4-hour window · peak ${peakItem?.label ?: ""} (${peakItem?.weight?.toInt() ?: 0} plays)",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
+        // Chart area — canvas draws grid + area fill + line + dots
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp)
+                .height(130.dp)
         ) {
-            // Draw visual gridlines
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                repeat(4) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(Color.White.copy(alpha = 0.04f))
+            Canvas(modifier = Modifier.fillMaxWidth().height(110.dp).align(Alignment.TopCenter)) {
+                val w = size.width
+                val h = size.height
+                val n = animatedWeights.size
+                if (n < 2) return@Canvas
+
+                val chartBottom = h
+                val chartTop    = 8f
+                val chartH      = chartBottom - chartTop
+
+                // X positions — evenly spaced
+                val xStep = w / (n - 1).toFloat()
+                val xs = List(n) { i -> i * xStep }
+
+                // Y positions — inverted (high value = low y)
+                val ys = animatedWeights.map { v ->
+                    chartBottom - (v / peakVal).coerceIn(0f, 1f) * chartH * 0.88f
+                }
+
+                // Horizontal grid lines (4 lines)
+                for (i in 1..4) {
+                    val gy = chartBottom - (i / 4f) * chartH * 0.88f
+                    drawLine(
+                        color       = gridColor,
+                        start       = Offset(0f, gy),
+                        end         = Offset(w, gy),
+                        strokeWidth = 1f
                     )
                 }
-                Spacer(modifier = Modifier.height(18.dp)) // margin for labels
+
+                // Build smooth cubic bezier path between points
+                val linePath = Path()
+                linePath.moveTo(xs[0], ys[0])
+                for (i in 0 until n - 1) {
+                    val cpX = (xs[i] + xs[i + 1]) / 2f
+                    linePath.cubicTo(cpX, ys[i], cpX, ys[i + 1], xs[i + 1], ys[i + 1])
+                }
+
+                // Area fill path — close down to the bottom
+                val fillPath = Path()
+                fillPath.addPath(linePath)
+                fillPath.lineTo(xs.last(), chartBottom)
+                fillPath.lineTo(xs.first(), chartBottom)
+                fillPath.close()
+
+                // Draw filled area
+                drawPath(
+                    path  = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors    = listOf(fillTop, fillBottom),
+                        startY    = chartTop,
+                        endY      = chartBottom
+                    )
+                )
+
+                // Draw line
+                drawPath(
+                    path  = linePath,
+                    color = lineColor,
+                    style = Stroke(
+                        width     = 2.5f,
+                        cap       = StrokeCap.Round,
+                        join      = StrokeJoin.Round
+                    )
+                )
+
+                // Draw dots at each data point
+                xs.zip(ys).forEachIndexed { i, (x, y) ->
+                    val isPeak = animatedWeights[i] == animatedWeights.maxOrNull()
+                    // outer glow ring
+                    drawCircle(
+                        color  = dotColor.copy(alpha = if (isPeak) 0.25f else 0.12f),
+                        radius = if (isPeak) 9f else 6f,
+                        center = Offset(x, y)
+                    )
+                    // filled dot
+                    drawCircle(
+                        color  = dotColor,
+                        radius = if (isPeak) 5f else 3.5f,
+                        center = Offset(x, y)
+                    )
+                    // white centre
+                    drawCircle(
+                        color  = Color.White,
+                        radius = if (isPeak) 2f else 1.5f,
+                        center = Offset(x, y)
+                    )
+                }
             }
 
+            // X-axis labels row — aligned to same x positions as dots
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                modifier              = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                hourStats.forEach { hourItem ->
-                    val barFraction = (hourItem.weight / peakVal).coerceIn(0.12f, 1.0f)
+                hourStats.forEachIndexed { i, hourItem ->
                     val isPeak = hourItem.weight == peakVal
-
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
+                        modifier            = Modifier.weight(1f)
                     ) {
+                        // Play count above label for each point
                         Text(
-                            text = hourItem.weight.toInt().toString(),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isPeak) NeonGreen else TextSecondary
+                            text       = hourItem.weight.toInt().toString(),
+                            fontSize   = 9.sp,
+                            fontWeight = if (isPeak) FontWeight.ExtraBold else FontWeight.Normal,
+                            color      = if (isPeak) NeonGreen else TextMuted.copy(alpha = 0.6f),
+                            textAlign  = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(22.dp)
-                                .fillMaxHeight(barFraction * 0.75f)
-                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            NeonGreen,
-                                            NeonGreen.copy(alpha = 0.25f),
-                                            Color.Transparent
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            NeonGreen.copy(alpha = 0.8f),
-                                            Color.Transparent
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
-                                )
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = hourItem.label,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isPeak) NeonGreen else TextSecondary,
-                            textAlign = TextAlign.Center
+                            text       = hourItem.label,
+                            fontSize   = 9.sp,
+                            fontWeight = if (isPeak) FontWeight.Bold else FontWeight.Normal,
+                            color      = if (isPeak) NeonGreen else TextMuted,
+                            textAlign  = TextAlign.Center
                         )
                     }
                 }
@@ -1640,33 +1716,72 @@ fun WatchChartCard(
 
         // 52-week bar chart — horizontally scrollable
         val scrollState = rememberScrollState(initial = Int.MAX_VALUE)
+
+        // Compute which week index is the first week of each month
+        val monthStartWeeks = remember {
+            val cal = Calendar.getInstance()
+            val year = cal.get(Calendar.YEAR)
+            val names = listOf("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+            val map = mutableMapOf<Int, String>()
+            for (month in 0..11) {
+                cal.set(year, month, 1)
+                val weekIdx = (cal.get(Calendar.WEEK_OF_YEAR) - 1).coerceIn(0, 51)
+                map[weekIdx] = names[month]
+            }
+            map
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
                 .horizontalScroll(scrollState)
         ) {
-            Row(
-                modifier = Modifier.height(72.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                weeklyBins.forEachIndexed { idx, count ->
-                    val fraction = if (maxVal > 0) count.toFloat() / maxVal else 0f
-                    val isFuture  = idx > currentWeekIdx
-                    val isCurrent = idx == currentWeekIdx
-                    val barColor = when {
-                        isFuture  -> Color(0xFF2A2D33)
-                        isCurrent -> NeonGreen
-                        fraction > 0f -> NeonGreen.copy(alpha = 0.5f + fraction * 0.4f)
-                        else          -> Color(0xFF2A2D33)
+            Column {
+                Row(
+                    modifier = Modifier.height(72.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    weeklyBins.forEachIndexed { idx, count ->
+                        val fraction = if (maxVal > 0) count.toFloat() / maxVal else 0f
+                        val isFuture  = idx > currentWeekIdx
+                        val isCurrent = idx == currentWeekIdx
+                        val barColor = when {
+                            isFuture  -> Color(0xFF2A2D33)
+                            isCurrent -> NeonGreen
+                            fraction > 0f -> NeonGreen.copy(alpha = 0.5f + fraction * 0.4f)
+                            else          -> Color(0xFF2A2D33)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(7.dp)
+                                .fillMaxHeight(fraction.coerceAtLeast(if (isFuture) 0f else 0.04f))
+                                .background(barColor, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+                        )
                     }
-                    Box(
-                        modifier = Modifier
-                            .width(7.dp)
-                            .fillMaxHeight(fraction.coerceAtLeast(if (isFuture) 0f else 0.04f))
-                            .background(barColor, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
-                    )
+                }
+
+                Spacer(modifier = Modifier.height(3.dp))
+
+                // Month labels axis
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    weeklyBins.forEachIndexed { idx, _ ->
+                        val label = monthStartWeeks[idx]
+                        Box(modifier = Modifier.width(7.dp)) {
+                            if (label != null) {
+                                Text(
+                                    text = label,
+                                    color = TextMuted.copy(alpha = 0.7f),
+                                    fontSize = 7.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Visible
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
